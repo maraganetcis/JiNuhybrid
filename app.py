@@ -194,7 +194,7 @@ class UltimateHybridChatbot:
             
             full_prompt = f"{system_prompt}\n\n사용자: {prompt}"
             
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-2.5-flash')
             response = model.generate_content(full_prompt)
             
             response_time = time.time() - start_time
