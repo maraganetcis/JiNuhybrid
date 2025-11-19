@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # ✅ 페이지 설정
 st.set_page_config(
-    page_title="JiNuhybrid",
+    page_title="JiNu Hybrid",
     page_icon="♻️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -202,7 +202,7 @@ class UltimateHybridChatbot:
             # 성능 로깅
             self.log_performance('gemini-2.5-flash', response_time, True, "")
             
-            logger.info(f"Gemini API 호출 성공: {response_time:.2f}초")
+            logger.info(f"Google API 호출 성공: {response_time:.2f}초")
             return response.text
             
         except Exception as e:
@@ -412,7 +412,7 @@ class UltimateHybridChatbot:
             st.subheader("🔌 API 상태")
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("Gemini", "✅" if self.gemini_available else "❌")
+                st.metric("Google", "✅" if self.gemini_available else "❌")
             with col2:
                 st.metric("OpenRouter", "✅" if self.openrouter_available else "❌")
             
@@ -487,10 +487,11 @@ class UltimateHybridChatbot:
         st.title(" JiNuhybrid")
         st.markdown("""
         **최강 성능의 하이브리드 AI 시스템:**
-        - 🧠 **Gemini AI**: Google 최신 모델
-        - 🔄 **OpenRouter**: 백업 AI 엔진  
+        - 🧠 *Google AI**: Google 최신 모델
+        - 🔄 **OpenRouter**: 고급추론 모델(Claude Sonnet, Lema)
         - 🎯 **지능형 라우팅**: 상황에 맞는 최적 모델 선택
         - ⚡ **실시간 처리**: 초고속 응답
+        (응답 지연은 텍스트 생성하는데 걸리는 시간으로 하이브리드 AI는 응답생성은 바로합니다)
         """)
         
         # 채팅 컨테이너
@@ -530,7 +531,7 @@ class UltimateHybridChatbot:
                     with col2:
                         st.metric("처리 시간", f"{result['processing_time']:.2f}초")
                     with col3:
-                        st.metric("감지된 의도", ', '.join(result['intent_analysis']['intents']))
+                        st.metric("질문 유형", ', '.join(result['intent_analysis']['intents']))
                     
                     # 모든 응답 보기
                     st.write("**모든 AI 응답:**")
