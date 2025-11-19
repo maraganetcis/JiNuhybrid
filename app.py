@@ -200,7 +200,7 @@ class UltimateHybridChatbot:
             response_time = time.time() - start_time
             
             # 성능 로깅
-            self.log_performance('gemini-1.5-flash', response_time, True, "")
+            self.log_performance('gemini-2.5-flash', response_time, True, "")
             
             logger.info(f"Gemini API 호출 성공: {response_time:.2f}초")
             return response.text
@@ -208,7 +208,7 @@ class UltimateHybridChatbot:
         except Exception as e:
             error_msg = f"Gemini API 오류: {str(e)}"
             logger.error(error_msg)
-            self.log_performance('gemini-1.5-flash', 0, False, error_msg)
+            self.log_performance('gemini-2.5-flash', 0, False, error_msg)
             return f"Gemini API 호출 중 오류: {str(e)}"
     
     def call_openrouter_api(self, prompt: str) -> str:
