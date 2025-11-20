@@ -9,8 +9,8 @@ from datetime import datetime
 
 # 페이지 설정
 st.set_page_config(
-    page_title="하이브리드 AI 시스템",
-    page_icon="🧠",
+    page_title="JiNu hybrid AI",
+    page_icon="⌘",
     layout="wide"
 )
 
@@ -197,9 +197,9 @@ class StreamlitAISystem:
         """Gemini 모델 호출"""
         try:
             if model_type == 'gemini_advanced':
-                model = genai.GenerativeModel('gemini-1.5-pro')
+                model = genai.GenerativeModel('gemini-2.5-pro')
             else:
-                model = genai.GenerativeModel('gemini-1.0-pro')
+                model = genai.GenerativeModel('gemini-2.5-flash')
             
             response = model.generate_content(prompt)
             return {
@@ -292,7 +292,7 @@ class StreamlitAISystem:
         st.session_state.usage_stats['cost_estimate'] += tokens * 0.00001
 
 def main():
-    st.title("🧠 하이브리드 AI 어시스턴트")
+    st.title("🚀 하이브리드 AI 어시스턴트")
     st.markdown("질문 유형에 따라 최적의 AI 모델이 자동으로 선택됩니다!")
     
     # 사이드바
