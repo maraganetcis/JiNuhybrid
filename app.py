@@ -1,590 +1,467 @@
-import streamlit as st
-import google.generativeai as genai
-import sqlite3
-import hashlib
-import requests
-import json
-import time
-import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 import os
-import sys
+import asyncio
+import logging
+from typing import Dict, List, Optional
+from dataclasses import dataclass
+from enum import Enum
+import google.generativeai as genai
+import requests
+from openai import OpenAI
+from anthropic import Anthropic
+from dotenv import load_dotenv
 
-# ✅ 로깅 설정
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('chatbot.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+# 환경 변수 로드
+load_dotenv()
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ✅ 페이지 설정
-st.set_page_config(
-    page_title="JiNu Hybrid",
-    page_icon="♻️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+class ModelProvider(Enum):
+    GOOGLE = "google"
+    OPENROUTER = "openrouter"
+    ANTHROPIC = "anthropic"
+    DEEPSEEK = "deepseek"
+    OPENAI = "openai"
 
-class UltimateHybridChatbot:
+@dataclass
+class ModelConfig:
+    provider: ModelProvider
+    model_name: str
+    api_key: str
+    base_url: Optional[str] = None
+    cost_per_input: float = 0.0
+    cost_per_output: float = 0.0
+
+class HybridAISystem:
     def __init__(self):
-        self.setup_apis()
-        self.setup_database()
-        self.setup_session_state()
-        logger.info("하이브리드 챗봇 초기화 완료")
-    
-    def setup_apis(self):
-        """모든 API 설정"""
-        try:
-            # Gemini API 설정
-            gemini_key = os.getenv("GEMINI_API_KEY")
-            if gemini_key:
-                genai.configure(api_key=gemini_key)
-                self.gemini_available = True
-                logger.info("Gemini API 설정 완료")
-            else:
-                self.gemini_available = False
-                logger.warning("Gemini API 키 없음")
-            
-            # OpenRouter API 설정
-            self.openrouter_key = os.getenv("OPENROUTER_API_KEY")
-            self.openrouter_available = bool(self.openrouter_key)
-            
-            if self.openrouter_available:
-                logger.info("OpenRouter API 설정 완료")
-            
-        except Exception as e:
-            logger.error(f"API 설정 중 오류: {e}")
-            st.error("API 설정 중 오류가 발생했습니다.")
-    
-    def setup_database(self):
-        """강력한 데이터베이스 초기화"""
-        try:
-            self.conn = sqlite3.connect('chatbot_website.db', check_same_thread=False)
-            cursor = self.conn.cursor()
-            
-            # ✅ conversations 테이블
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS conversations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT,
-                    user_message TEXT,
-                    bot_response TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    model_used TEXT,
-                    response_time REAL,
-                    intent_detected TEXT
-                )
-            ''')
-            
-            # ✅ users 테이블
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT UNIQUE,
-                    first_visit DATETIME,
-                    last_visit DATETIME,
-                    visit_count INTEGER DEFAULT 0,
-                    total_messages INTEGER DEFAULT 0
-                )
-            ''')
-            
-            # ✅ performance 테이블
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS performance (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    model_name TEXT,
-                    response_time REAL,
-                    success BOOLEAN,
-                    error_message TEXT
-                )
-            ''')
-            
-            self.conn.commit()
-            logger.info("데이터베이스 초기화 완료")
-            
-        except Exception as e:
-            logger.error(f"데이터베이스 초기화 실패: {e}")
-            st.error("데이터베이스 초기화에 실패했습니다.")
-    
-    def setup_session_state(self):
-        """세션 상태 초기화"""
-        if 'messages' not in st.session_state:
-            st.session_state.messages = []
+        # API 키 초기화
+        self.google_api_key = os.getenv('GOOGLE_API_KEY')
+        self.openrouter_key = os.getenv('OPENROUTER_API_KEY')
+        self.anthropic_key = os.getenv('ANTHROPIC_API_KEY')
+        self.deepseek_key = os.getenv('DEEPSEEK_API_KEY')
         
-        if 'user_id' not in st.session_state:
-            st.session_state.user_id = hashlib.md5(
-                str(datetime.now().timestamp()).encode()
-            ).hexdigest()
-            self.track_user_visit()
-        
-        if 'chat_start_time' not in st.session_state:
-            st.session_state.chat_start_time = datetime.now()
-    
-    def track_user_visit(self):
-        """사용자 방문 추적"""
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute('''
-                INSERT OR REPLACE INTO users 
-                (session_id, first_visit, last_visit, visit_count, total_messages)
-                VALUES (?, 
-                       COALESCE((SELECT first_visit FROM users WHERE session_id=?), datetime('now')), 
-                       datetime('now'), 
-                       COALESCE((SELECT visit_count FROM users WHERE session_id=?), 0) + 1,
-                       COALESCE((SELECT total_messages FROM users WHERE session_id=?), 0)
-                )
-            ''', (st.session_state.user_id, st.session_state.user_id, 
-                  st.session_state.user_id, st.session_state.user_id))
-            
-            self.conn.commit()
-            logger.info(f"사용자 방문 기록: {st.session_state.user_id}")
-            
-        except Exception as e:
-            logger.error(f"사용자 추적 오류: {e}")
-    
-    def detect_intent(self, user_input: str) -> Dict:
-        """고급 의도 감지 시스템"""
-        intents = {
-            'creative': ['작성', '생성', '만들', '글쓰기', '시', '이야기', '창의'],
-            'technical': ['코드', '프로그래밍', '알고리즘', '개발', '설계', '파이썬', '자바'],
-            'factual': ['뭐야', '무엇', '알려줘', '정보', '사실', '정의', '의미'],
-            'analytical': ['분석', '비교', '장단점', '왜', '어떻게', '원인', '결과'],
-            'casual': ['안녕', '하이', '잘지내', '고마워', 'ㅋㅋ', 'ㅎㅎ', '반가워']
-        }
-        
-        detected_intents = []
-        for intent, keywords in intents.items():
-            if any(keyword in user_input for keyword in keywords):
-                detected_intents.append(intent)
-        
-        # 복잡도 분석
-        complexity = 'high' if len(user_input.split()) > 10 else 'medium'
-        complexity = 'low' if len(user_input.split()) < 3 else complexity
-        
-        return {
-            'intents': detected_intents if detected_intents else ['general'],
-            'complexity': complexity,
-            'requires_context': len(user_input) > 20
-        }
-    
-    def call_gemini_api(self, prompt: str, intent: str) -> str:
-        """Gemini API 호출"""
-        if not self.gemini_available:
-            return "Gemini API를 사용할 수 없습니다. API 키를 확인해주세요."
-        
-        try:
-            start_time = time.time()
-            
-            # 의도별 프롬프트 최적화
-            intent_prompts = {
-                'creative': "당신은 창의적인 작가입니다. 창의적이고 흥미로운 내용을 생성해주세요.",
-                'technical': "당신은 전문 소프트웨어 엔지니어입니다. 정확하고 실용적인 답변을 제공해주세요.",
-                'factual': "당신은 전문 백과사전입니다. 사실적이고 정확한 정보만 제공해주세요.",
-                'analytical': "당신은 분석 전문가입니다. 깊이 있고 체계적인 분석을 제공해주세요.",
-                'casual': "당신은 친근한 AI 어시스턴트입니다. 따뜻하고 자연스러운 대화를 나눠주세요."
-            }
-            
-            system_prompt = intent_prompts.get(intent, "당신은 유용한 AI 어시스턴트입니다.")
-            
-            full_prompt = f"{system_prompt}\n\n사용자: {prompt}"
-            
-            model = genai.GenerativeModel('gemini-2.5-flash')
-            response = model.generate_content(full_prompt)
-            
-            response_time = time.time() - start_time
-            
-            # 성능 로깅
-            self.log_performance('gemini-2.5-flash', response_time, True, "")
-            
-            logger.info(f"Google API 호출 성공: {response_time:.2f}초")
-            return response.text
-            
-        except Exception as e:
-            error_msg = f"Gemini API 오류: {str(e)}"
-            logger.error(error_msg)
-            self.log_performance('gemini-2.5-flash', 0, False, error_msg)
-            return f"Gemini API 호출 중 오류: {str(e)}"
-    
-    def call_openrouter_api(self, prompt: str) -> str:
-        """OpenRouter API 호출 (백업)"""
-        if not self.openrouter_available:
-            return "OpenRouter API를 사용할 수 없습니다."
-        
-        try:
-            start_time = time.time()
-            
-            url = "https://openrouter.ai/api/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.openrouter_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://your-website.com",
-                "X-Title": "AI Chatbot Website"
-            }
-            
-            data = {
-                "model": "meta-llama/llama-3.1-8b-instruct:free",
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": 1000
-            }
-            
-            response = requests.post(url, headers=headers, json=data, timeout=30)
-            
-            response_time = time.time() - start_time
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result['choices'][0]['message']['content']
-                
-                self.log_performance('llama-3.1-8b-instruct', response_time, True, "")
-                logger.info(f"OpenRouter API 호출 성공: {response_time:.2f}초")
-                return content
-            else:
-                error_msg = f"OpenRouter API 오류: {response.status_code}"
-                logger.error(error_msg)
-                self.log_performance('llama-3.1-8b-instruct', response_time, False, error_msg)
-                return f"OpenRouter API 호출 실패: {response.status_code}"
-                
-        except Exception as e:
-            error_msg = f"OpenRouter API 예외: {str(e)}"
-            logger.error(error_msg)
-            self.log_performance('llama-3.1-8b-instruct', 0, False, error_msg)
-            return f"OpenRouter API 호출 중 오류: {str(e)}"
-    
-    def log_performance(self, model_name: str, response_time: float, success: bool, error_message: str = ""):
-        """성능 로깅"""
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute('''
-                INSERT INTO performance (model_name, response_time, success, error_message)
-                VALUES (?, ?, ?, ?)
-            ''', (model_name, response_time, success, error_message))
-            self.conn.commit()
-        except Exception as e:
-            logger.error(f"성능 로깅 오류: {e}")
-    
-    def hybrid_response_generation(self, user_input: str) -> Dict:
-        """하이브리드 응답 생성 시스템"""
-        start_time = time.time()
-        intent_analysis = self.detect_intent(user_input)
-        primary_intent = intent_analysis['intents'][0]
-        
-        responses = {}
-        models_used = []
-        
-        # 1. 기본: Gemini API 시도
-        if self.gemini_available:
-            gemini_response = self.call_gemini_api(user_input, primary_intent)
-            responses['gemini'] = gemini_response
-            models_used.append('gemini')
-        
-        # 2. 백업: OpenRouter 시도
-        if self.openrouter_available and ('gemini' not in responses or "오류" in responses['gemini']):
-            openrouter_response = self.call_openrouter_api(user_input)
-            responses['openrouter'] = openrouter_response
-            models_used.append('openrouter')
-        
-        # 3. 최후의 백업: 로컬 응답
-        if not responses or all("오류" in response for response in responses.values()):
-            responses['fallback'] = self.generate_fallback_response(user_input, intent_analysis)
-            models_used.append('fallback')
-        
-        total_time = time.time() - start_time
-        
-        return {
-            'responses': responses,
-            'models_used': models_used,
-            'processing_time': total_time,
-            'intent_analysis': intent_analysis,
-            'final_response': self.select_best_response(responses, intent_analysis)
-        }
-    
-    def generate_fallback_response(self, user_input: str, intent_analysis: Dict) -> str:
-        """폴백 응답 생성"""
-        fallback_responses = {
-            'creative': "제가 창의적인 내용을 생성하려면 API 연결이 필요합니다. 현재는 연결에 문제가 있어 간단한 답변만 가능합니다.",
-            'technical': "기술적인 질문에는 정확한 API 응답이 필요합니다. 현재 API 연결을 확인 중입니다.",
-            'factual': "사실적인 정보를 제공하기 위해선 API 접근이 필요합니다. 잠시 후 다시 시도해주세요.",
-            'general': "현재 AI 서비스에 일시적으로 접속할 수 없습니다. 잠시 후 다시 시도해주세요."
-        }
-        
-        for intent in intent_analysis['intents']:
-            if intent in fallback_responses:
-                return fallback_responses[intent]
-        
-        return fallback_responses['general']
-    
-    def select_best_response(self, responses: Dict, intent_analysis: Dict) -> str:
-        """최적의 응답 선택"""
-        # Gemini 응답이 있으면 우선 사용
-        if 'gemini' in responses and responses['gemini'] and "오류" not in responses['gemini']:
-            return responses['gemini']
-        
-        # OpenRouter 응답
-        if 'openrouter' in responses and responses['openrouter']:
-            return responses['openrouter']
-        
-        # 폴백 응답
-        if 'fallback' in responses:
-            return responses['fallback']
-        
-        return "죄송합니다. 현재 서비스에 접속할 수 없습니다. 잠시 후 다시 시도해주세요."
-    
-    def save_conversation(self, user_input: str, result: Dict):
-        """대화 저장"""
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute('''
-                INSERT INTO conversations 
-                (session_id, user_message, bot_response, model_used, response_time, intent_detected)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                st.session_state.user_id,
-                user_input,
-                result['final_response'],
-                ','.join(result['models_used']),
-                result['processing_time'],
-                ','.join(result['intent_analysis']['intents'])
-            ))
-            
-            # 사용자 메시지 수 업데이트
-            cursor.execute('''
-                UPDATE users SET total_messages = total_messages + 1 
-                WHERE session_id = ?
-            ''', (st.session_state.user_id,))
-            
-            self.conn.commit()
-            logger.info(f"대화 저장 완료: {user_input[:50]}...")
-            
-        except Exception as e:
-            logger.error(f"대화 저장 오류: {e}")
-    
-    def get_conversation_stats(self) -> Dict:
-        """대화 통계 조회"""
-        try:
-            cursor = self.conn.cursor()
-            
-            # 총 대화 수
-            cursor.execute("SELECT COUNT(*) FROM conversations")
-            total_conversations = cursor.fetchone()[0] or 0
-            
-            # 총 사용자 수
-            cursor.execute("SELECT COUNT(DISTINCT session_id) FROM users")
-            total_users = cursor.fetchone()[0] or 0
-            
-            # 오늘 대화 수
-            cursor.execute("SELECT COUNT(*) FROM conversations WHERE DATE(timestamp) = DATE('now')")
-            today_conversations = cursor.fetchone()[0] or 0
-            
-            # 평균 응답 시간
-            cursor.execute("SELECT AVG(response_time) FROM conversations WHERE response_time IS NOT NULL")
-            avg_response_time = cursor.fetchone()[0] or 0
-            
-            return {
-                'total_conversations': total_conversations,
-                'total_users': total_users,
-                'today_conversations': today_conversations,
-                'avg_response_time': avg_response_time
-            }
-            
-        except Exception as e:
-            logger.error(f"통계 조회 오류: {e}")
-            return {
-                'total_conversations': 0,
-                'total_users': 0,
-                'today_conversations': 0,
-                'avg_response_time': 0
-            }
-    
-    def display_sidebar(self):
-        """고급 사이드바 표시"""
-        with st.sidebar:
-            st.title("🚀 AI 챗봇 컨트롤")
-            
-            # API 상태 표시
-            st.subheader("🔌 API 상태")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Google", "✅" if self.gemini_available else "❌")
-            with col2:
-                st.metric("OpenRouter", "✅" if self.openrouter_available else "❌")
-            
-            st.markdown("---")
-            
-            # 실시간 통계
-            st.subheader("📊 실시간 통계")
-            stats = self.get_conversation_stats()
-            
-            st.metric("총 대화 수", f"{stats['total_conversations']:,}")
-            st.metric("총 사용자 수", f"{stats['total_users']:,}")
-            st.metric("오늘 대화", f"{stats['today_conversations']:,}")
-            st.metric("평균 응답시간", f"{stats['avg_response_time']:.2f}s")
-            
-            st.markdown("---")
-            
-            # 관리 기능
-            st.subheader("⚙️ 관리")
-            
-            if st.button("🗑️ 현재 대화 지우기", use_container_width=True):
-                st.session_state.messages = []
-                st.rerun()
-            
-            if st.button("📊 성능 리포트", use_container_width=True):
-                self.show_performance_report()
-            
-            # 시스템 정보
-            st.markdown("---")
-            st.markdown("""
-            **🔧 시스템 정보**
-            - 하이브리드 AI 엔진
-            - 실시간 모니터링
-            - 자동 장애 조치
-            """)
-    
-    def show_performance_report(self):
-        """성능 리포트 표시"""
-        try:
-            cursor = self.conn.cursor()
-            
-            # 모델별 성능 통계
-            cursor.execute('''
-                SELECT model_name, 
-                       AVG(response_time) as avg_time,
-                       COUNT(*) as total_requests,
-                       SUM(CASE WHEN success THEN 1 ELSE 0 END) as success_count
-                FROM performance 
-                GROUP BY model_name
-            ''')
-            
-            performance_data = cursor.fetchall()
-            
-            with st.expander("📈 상세 성능 리포트", expanded=True):
-                st.subheader("모델별 성능 비교")
-                
-                for model, avg_time, total_requests, success_count in performance_data:
-                    success_rate = (success_count / total_requests * 100) if total_requests > 0 else 0
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric(f"{model}", f"{avg_time:.2f}s")
-                    with col2:
-                        st.metric("요청 수", total_requests)
-                    with col3:
-                        st.metric("성공률", f"{success_rate:.1f}%")
-                    
-        except Exception as e:
-            st.error(f"성능 리포트 생성 오류: {e}")
-    
-    def display_chat_interface(self):
-        """고급 채팅 인터페이스"""
-        st.title(" JiNuhybrid")
-        st.markdown("""
-        **최강 성능의 하이브리드 AI 시스템:**
-        - 🧠 *Google AI**: Google 최신 모델
-        - 🔄 **OpenRouter**: 고급추론 모델(Claude Sonnet, Lema)
-        - 🎯 **지능형 라우팅**: 상황에 맞는 최적 모델 선택
-        - ⚡ **실시간 처리**: 초고속 응답
-        (응답 지연은 텍스트 생성하는데 걸리는 시간으로 하이브리드 AI는 응답생성은 바로합니다)
-        """)
-        
-        # 채팅 컨테이너
-        chat_container = st.container()
-        
-        with chat_container:
-            # 대화 기록 표시
-            for message in st.session_state.messages:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-                    
-                    # 메타정보 표시 (AI 응답인 경우)
-                    if message["role"] == "assistant" and "metadata" in message:
-                        with st.expander("🔍 상세 정보"):
-                            st.write(f"**사용 모델:** {message['metadata'].get('models_used', 'N/A')}")
-                            st.write(f"**처리 시간:** {message['metadata'].get('processing_time', 0):.2f}초")
-                            st.write(f"**의도 분석:** {', '.join(message['metadata'].get('intents', []))}")
-        
-        # 사용자 입력
-        if prompt := st.chat_input("무엇이 궁금하신가요?"):
-            # 사용자 메시지 표시
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            
-            # AI 응답 생성
-            with st.chat_message("assistant"):
-                with st.spinner("🤔 하이브리드 AI가 분석 중..."):
-                    result = self.hybrid_response_generation(prompt)
-                
-                # 응답 표시
-                st.markdown(result['final_response'])
-                
-                # 상세 정보
-                with st.expander("🔧 기술적 세부사항"):
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("사용 모델", ', '.join(result['models_used']))
-                    with col2:
-                        st.metric("처리 시간", f"{result['processing_time']:.2f}초")
-                    with col3:
-                        st.metric("질문 유형", ', '.join(result['intent_analysis']['intents']))
-                    
-                    # 모든 응답 보기
-                    st.write("**모든 AI 응답:**")
-                    for model, response in result['responses'].items():
-                        st.write(f"**{model.upper()}:** {response}")
-            
-            # 세션에 메시지 저장 (메타데이터 포함)
-            st.session_state.messages.append({
-                "role": "assistant", 
-                "content": result['final_response'],
-                "metadata": {
-                    "models_used": result['models_used'],
-                    "processing_time": result['processing_time'],
-                    "intents": result['intent_analysis']['intents']
-                }
-            })
-            
-            # 데이터베이스 저장
-            self.save_conversation(prompt, result)
-            
-            # 페이지 새로고침
-            st.rerun()
-
-def main():
-    """메인 애플리케이션"""
-    try:
-        # 앱 초기화
-        chatbot = UltimateHybridChatbot()
-        
-        # 사이드바 표시
-        chatbot.display_sidebar()
-        
-        # 메인 채팅 인터페이스 표시
-        chatbot.display_chat_interface()
-        
-        # 푸터
-        st.markdown("---")
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.markdown(
-                "<div style='text-align: center; color: gray;'>"
-                "Copyright ⓒ 2025. Synox Studios"
-                "</div>", 
-                unsafe_allow_html=True
+        # 모델 구성
+        self.models = {
+            'gemini_flash': ModelConfig(
+                provider=ModelProvider.GOOGLE,
+                model_name='gemini-2.0-flash',
+                api_key=self.google_api_key,
+                cost_per_input=0.075,  # $0.75 per 1M tokens
+                cost_per_output=0.30   # $3.00 per 1M tokens
+            ),
+            'gemini_pro': ModelConfig(
+                provider=ModelProvider.GOOGLE,
+                model_name='gemini-1.5-pro',
+                api_key=self.google_api_key,
+                cost_per_input=3.75,   # $7.5 per 1M tokens
+                cost_per_output=15.00  # $15.0 per 1M tokens
+            ),
+            'claude_sonnet': ModelConfig(
+                provider=ModelProvider.OPENROUTER,
+                model_name='anthropic/claude-3.5-sonnet',
+                api_key=self.openrouter_key,
+                base_url='https://openrouter.ai/api/v1',
+                cost_per_input=3.0,    # $3.0 per 1M tokens
+                cost_per_output=15.0   # $15.0 per 1M tokens
+            ),
+            'deepseek_v3': ModelConfig(
+                provider=ModelProvider.DEEPSEEK,
+                model_name='deepseek-chat',
+                api_key=self.deepseek_key,
+                base_url='https://api.deepseek.com/v1',
+                cost_per_input=0.14,   # $1.4 per 1M tokens
+                cost_per_output=0.28   # $2.8 per 1M tokens
+            ),
+            'llama_70b': ModelConfig(
+                provider=ModelProvider.OPENROUTER,
+                model_name='meta-llama/llama-3-70b-instruct',
+                api_key=self.openrouter_key,
+                base_url='https://openrouter.ai/api/v1',
+                cost_per_input=0.59,   # $0.59 per 1M tokens
+                cost_per_output=0.79   # $0.79 per 1M tokens
             )
+        }
         
-        # 세션 시간 표시
-        session_duration = datetime.now() - st.session_state.chat_start_time
-        st.sidebar.markdown(f"**세션 시간:** {str(session_duration).split('.')[0]}")
+        # 제공자별 클라이언트 초기화
+        if self.google_api_key:
+            genai.configure(api_key=self.google_api_key)
         
-    except Exception as e:
-        logger.error(f"애플리케이션 실행 중 오류: {e}")
-        st.error("애플리케이션 실행 중 오류가 발생했습니다. 콘솔 로그를 확인해주세요.")
+        self.openai_client = OpenAI(api_key=self.deepseek_key) if self.deepseek_key else None
+        self.anthropic_client = Anthropic(api_key=self.anthropic_key) if self.anthropic_key else None
+        
+        self.available_models = self._check_available_models()
+    
+    def _check_available_models(self) -> Dict:
+        """사용 가능한 모델 확인"""
+        available = {}
+        
+        # Google 모델 확인
+        if self.google_api_key:
+            available['gemini_flash'] = self.models['gemini_flash']
+            available['gemini_pro'] = self.models['gemini_pro']
+        
+        # OpenRouter 모델 확인
+        if self.openrouter_key:
+            available['claude_sonnet'] = self.models['claude_sonnet']
+            available['llama_70b'] = self.models['llama_70b']
+        
+        # DeepSeek 모델 확인
+        if self.deepseek_key:
+            available['deepseek_v3'] = self.models['deepseek_v3']
+        
+        logger.info(f"Available models: {list(available.keys())}")
+        return available
+
+    def advanced_intent_analysis(self, user_input: str) -> Dict:
+        """고급 의도 분석 시스템 - 복잡한 추론 추가"""
+        intent_keywords = {
+            'complex_reasoning': [
+                '논리', '추론', '분석', '비교', '평가', '판단', '결론', '가정',
+                '전제', '논증', '타당성', '비판적', '사고', '이유', '근거',
+                '복잡한', '난이도', '심층', '다단계', '종합', '통합', '논문',
+                '연구', '실험', '가설', '검증'
+            ],
+            'technical': [
+                '코드', '프로그래밍', '알고리즘', '개발', '설계', '파이썬', 
+                '자바', '자바스크립트', '리액트', 'vue', 'html', 'css',
+                '디버그', '버그', '오류', '컴파일', '함수', '클래스'
+            ],
+            'creative': [
+                '작성', '생성', '만들', '글쓰기', '시', '이야기', '창의',
+                '아이디어', '기획', '콘텐츠', '마케팅', '광고', '브랜드'
+            ],
+            'mathematical': [
+                '계산', '수학', '공식', '방정식', '통계', '확률', '미분',
+                '적분', '함수', '기하', '대수', '삼각함수', '행렬'
+            ],
+            'research': [
+                '연구', '논문', '참고문헌', '학술', '이론', '실험', '데이터',
+                '분석', '통계', '설문', '조사', '리서치'
+            ],
+            'factual': [
+                '뭐야', '무엇', '알려줘', '정보', '사실', '정의', '의미',
+                '개념', '원리', '방법'
+            ],
+            'casual': [
+                '안녕', '하이', '잘지내', '고마워', '반가워', 'ㅎㅎ', 'ㅋㅋ'
+            ]
+        }
+        
+        # 의도 점수 계산
+        intent_scores = {}
+        user_lower = user_input.lower()
+        
+        for intent, keywords in intent_keywords.items():
+            score = sum(10 for keyword in keywords if keyword in user_lower)
+            if score > 0:
+                intent_scores[intent] = score
+        
+        # 복잡도 분석 강화
+        word_count = len(user_input.split())
+        sentence_count = user_input.count('.') + user_input.count('?') + user_input.count('!')
+        
+        has_complex_indicators = any(word in user_lower for word in [
+            '분석', '비교', '평가', '논리', '추론', '전제', '결론', '연구'
+        ])
+        
+        # 복잡도 점수 계산
+        complexity_score = word_count * 0.5 + sentence_count * 2
+        
+        if complexity_score > 25 or has_complex_indicators:
+            complexity = 'very_high'
+        elif complexity_score > 15:
+            complexity = 'high'
+        elif complexity_score > 8:
+            complexity = 'medium'
+        else:
+            complexity = 'low'
+        
+        # 주요 의도 선택 (복잡한 추론 우선)
+        if 'complex_reasoning' in intent_scores:
+            primary_intent = 'complex_reasoning'
+        elif intent_scores:
+            primary_intent = max(intent_scores, key=intent_scores.get())
+        else:
+            primary_intent = 'general'
+        
+        return {
+            'primary_intent': primary_intent,
+            'all_intents': list(intent_scores.keys()),
+            'intent_scores': intent_scores,
+            'complexity': complexity,
+            'word_count': word_count,
+            'sentence_count': sentence_count,
+            'complexity_score': complexity_score,
+            'is_complex': complexity in ['high', 'very_high']
+        }
+
+    def select_optimal_model(self, intent_analysis: Dict, budget_conscious: bool = True) -> Dict:
+        """최적의 AI 모델 선택 - 비용 효율성 고려"""
+        
+        # 비용 효율적인 모델 매핑
+        cost_effective_mapping = {
+            'complex_reasoning': {
+                'primary': 'claude_sonnet',
+                'reason': '🧠 복잡한 추론에는 Claude 3.5 Sonnet이 가장 우수함',
+                'backup': 'gemini_pro'
+            },
+            'technical': {
+                'primary': 'gemini_flash',
+                'reason': '🔧 기술/코드 관련 질문에는 Gemini Flash가 빠르고 정확함',
+                'backup': 'deepseek_v3'
+            },
+            'mathematical': {
+                'primary': 'gemini_flash',
+                'reason': '🧮 수학적 문제에는 Gemini Flash의 정확도가 높음',
+                'backup': 'deepseek_v3'
+            },
+            'research': {
+                'primary': 'claude_sonnet',
+                'reason': '📊 연구/학술 분석에는 Claude의 깊은 이해력이 적합',
+                'backup': 'gemini_pro'
+            },
+            'creative': {
+                'primary': 'claude_sonnet',
+                'reason': '🎨 창의적 작업에는 Claude의 유연성이 좋음',
+                'backup': 'gemini_pro'
+            },
+            'general': {
+                'primary': 'gemini_flash',
+                'reason': '⚡ 일반 질문에는 Gemini Flash의 빠른 응답이 적합',
+                'backup': 'deepseek_v3'
+            },
+            'factual': {
+                'primary': 'deepseek_v3',
+                'reason': '💰 사실 확인에는 가장 저렴한 DeepSeek이 효율적',
+                'backup': 'gemini_flash'
+            }
+        }
+        
+        # 고성능 모델 매핑 (비용 덜 중요)
+        performance_mapping = {
+            'complex_reasoning': {
+                'primary': 'claude_sonnet',
+                'reason': '🧠 최고 수준의 추론 성능을 위한 Claude 3.5 Sonnet',
+                'backup': 'gemini_pro'
+            },
+            'technical': {
+                'primary': 'gemini_pro',
+                'reason': '🔧 정밀한 기술 작업에는 Gemini Pro가 적합',
+                'backup': 'claude_sonnet'
+            },
+            # ... 나머지 의도들도 유사하게 구성
+        }
+        
+        # 매핑 선택
+        model_mapping = cost_effective_mapping if budget_conscious else performance_mapping
+        
+        # 복잡도가 매우 높으면 복잡한 추론 모델 강제 사용
+        if intent_analysis['complexity'] == 'very_high':
+            primary_intent = 'complex_reasoning'
+        else:
+            primary_intent = intent_analysis['primary_intent']
+        
+        model_choice = model_mapping.get(primary_intent, model_mapping['general'])
+        
+        # 선택된 모델이 사용 가능한지 확인
+        if model_choice['primary'] not in self.available_models:
+            model_choice['primary'] = model_choice['backup']
+        
+        return model_choice
+
+    async def call_model(self, prompt: str, model_config: ModelConfig, intent: str) -> Dict:
+        """모델 호출 - 비동기 처리"""
+        
+        reasoning_prompts = {
+            'complex_reasoning': """
+            당신은 논리적 추론 전문가입니다. 다음 단계로 체계적으로 접근해주세요:
+            
+            1. **문제 분석**: 핵심 요소와 주요 개념 파악
+            2. **전제 확인**: 명시적/암묵적 가정 식별
+            3. **논리 구조**: 주장과 근거의 연결 관계 분석
+            4. **비판적 검토**: 타당성과 한계점 평가
+            5. **결론 도출**: 체계적인 추론을 통한 최종 판단
+            
+            질문: {prompt}
+            """,
+            'technical': """
+            당신은 소프트웨어 엔지니어링 전문가입니다. 다음을 확인해주세요:
+            
+            1. **요구사항 분석**: 기술적 요구사항 명확히 이해
+            2. **아키텍처 설계**: 최적의 솔루션 구조 제안
+            3. **코드 구현**: 실용적이고 효율적인 코드 작성
+            4. **테스트 계획**: 검증 가능한 테스트 케이스 제시
+            5. **성능 고려**: 확장성과 유지보수성 고려
+            
+            질문: {prompt}
+            """,
+            'mathematical': """
+            당신은 수학적 문제 해결 전문가입니다. 단계별로 접근해주세요:
+            
+            1. **문제 이해**: 주어진 조건과 구해야 하는 값 정의
+            2. **접근법 선택**: 적절한 공식/이론/알고리즘 선택
+            3. **단계적 계산**: 체계적인 계산 과정 제시
+            4. **결과 검증**: 답변의 타당성 확인
+            5. **대안 제시**: 다른 접근법 가능성 탐색
+            
+            질문: {prompt}
+            """
+        }
+        
+        specialized_prompt = reasoning_prompts.get(
+            intent, 
+            "명확하고 체계적으로 답변해주세요: {prompt}"
+        ).format(prompt=prompt)
+        
+        try:
+            if model_config.provider == ModelProvider.GOOGLE:
+                return await self._call_google_model(specialized_prompt, model_config)
+            elif model_config.provider == ModelProvider.OPENROUTER:
+                return await self._call_openrouter_model(specialized_prompt, model_config)
+            elif model_config.provider == ModelProvider.DEEPSEEK:
+                return await self._call_deepseek_model(specialized_prompt, model_config)
+            else:
+                raise ValueError(f"Unsupported provider: {model_config.provider}")
+                
+        except Exception as e:
+            logger.error(f"Model call failed: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'content': None,
+                'tokens_used': 0,
+                'cost': 0.0
+            }
+
+    async def _call_google_model(self, prompt: str, config: ModelConfig) -> Dict:
+        """Google Gemini 모델 호출"""
+        model = genai.GenerativeModel(config.model_name)
+        response = model.generate_content(prompt)
+        
+        return {
+            'success': True,
+            'content': response.text,
+            'tokens_used': len(prompt.split()) + len(response.text.split()),  # 추정치
+            'cost': 0.0,  # 실제로는 정확한 토큰 수 계산 필요
+            'model': config.model_name
+        }
+
+    async def _call_openrouter_model(self, prompt: str, config: ModelConfig) -> Dict:
+        """OpenRouter 모델 호출"""
+        data = {
+            "model": config.model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 2000,
+            "temperature": 0.3
+        }
+        
+        response = requests.post(
+            f"{config.base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {config.api_key}"},
+            json=data,
+            timeout=45
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result['choices'][0]['message']['content']
+            tokens_used = result.get('usage', {}).get('total_tokens', 0)
+            
+            return {
+                'success': True,
+                'content': content,
+                'tokens_used': tokens_used,
+                'cost': (tokens_used / 1000000) * config.cost_per_input,  # 단순화
+                'model': config.model_name
+            }
+        else:
+            raise Exception(f"OpenRouter API error: {response.status_code}")
+
+    async def _call_deepseek_model(self, prompt: str, config: ModelConfig) -> Dict:
+        """DeepSeek 모델 호출"""
+        data = {
+            "model": config.model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 2000,
+            "temperature": 0.3
+        }
+        
+        response = requests.post(
+            f"{config.base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {config.api_key}"},
+            json=data,
+            timeout=45
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result['choices'][0]['message']['content']
+            tokens_used = result.get('usage', {}).get('total_tokens', 0)
+            
+            return {
+                'success': True,
+                'content': content,
+                'tokens_used': tokens_used,
+                'cost': (tokens_used / 1000000) * config.cost_per_input,
+                'model': config.model_name
+            }
+        else:
+            raise Exception(f"DeepSeek API error: {response.status_code}")
+
+    async def process_query(self, user_input: str, budget_conscious: bool = True) -> Dict:
+        """사용자 쿼리 처리 메인 함수"""
+        
+        # 1. 의도 분석
+        intent_analysis = self.advanced_intent_analysis(user_input)
+        logger.info(f"Intent analysis: {intent_analysis}")
+        
+        # 2. 모델 선택
+        model_choice = self.select_optimal_model(intent_analysis, budget_conscious)
+        logger.info(f"Model choice: {model_choice}")
+        
+        # 3. 모델 호출
+        model_config = self.available_models[model_choice['primary']]
+        response = await self.call_model(
+            user_input, 
+            model_config, 
+            intent_analysis['primary_intent']
+        )
+        
+        return {
+            'intent_analysis': intent_analysis,
+            'model_choice': model_choice,
+            'response': response,
+            'timestamp': asyncio.get_event_loop().time()
+        }
+
+# 사용 예제
+async def main():
+    system = HybridAISystem()
+    
+    test_queries = [
+        "파이썬에서 다중 상속의 장단점과 MRO(Method Resolution Order)에 대해 설명해줘",
+        "기후 변화가 경제 성장에 미치는 영향을 논리적으로 분석해줘",
+        "안녕! 오늘 기분이 어때?",
+        "미분방정식과 선형대수의 관계를 수학적으로 설명해줘"
+    ]
+    
+    for query in test_queries:
+        print(f"\n{'='*50}")
+        print(f"Query: {query}")
+        print(f"{'='*50}")
+        
+        result = await system.process_query(query, budget_conscious=True)
+        
+        if result['response']['success']:
+            print(f"Intent: {result['intent_analysis']['primary_intent']}")
+            print(f"Model: {result['model_choice']['primary']}")
+            print(f"Reason: {result['model_choice']['reason']}")
+            print(f"Response: {result['response']['content'][:200]}...")
+            print(f"Tokens used: {result['response']['tokens_used']}")
+            print(f"Estimated cost: ${result['response']['cost']:.6f}")
+        else:
+            print(f"Error: {result['response']['error']}")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
