@@ -296,7 +296,7 @@ class FreePlanAISystem:
         if not self.gemini_available: return {'success': False}
         try:
             start_time = time.time()
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-2.5-flash')
             response = model.generate_content(prompt)
             st.session_state.model_usage['gemini'] = st.session_state.model_usage.get('gemini', 0) + 1
             return {
