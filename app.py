@@ -409,7 +409,7 @@ class FreePlanAISystem:
            copyright © 2025 <strong>Synox Studios</strong>. <br>
             <span style="color: #667eea;">Gemini 2.5</span> (Basic) • 
             <span style="color: #f25c54;">Qwen 2.5</span> (Code) •
-            <span style="color: #d97757;">Llama 3.3</span> (Search)
+            <span style="color: #d97757;">Synox Studios KJS 1</span> (Search)
         </div>
         """, unsafe_allow_html=True)
 
