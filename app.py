@@ -95,6 +95,15 @@ st.markdown("""
         margin: 0.5rem 0;
         text-align: center;
     }
+    /* 푸터 스타일 */
+    .footer {
+        text-align: center;
+        color: #aaa;
+        font-size: 0.8rem;
+        padding: 2rem 0;
+        margin-top: 2rem;
+        border-top: 1px solid #f0f0f0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -104,7 +113,7 @@ class FreePlanAISystem:
         self.setup_database()
         self.initialize_session_state()
         self.setup_rate_limiting()
-        logger.info("하이브리드 AI 시스템 초기화 완료 (Groq Edition)")
+        logger.info("하이브리드 AI 시스템 초기화 완료")
     
     def setup_api_keys(self):
         """API 키 설정"""
@@ -120,15 +129,14 @@ class FreePlanAISystem:
             self.openrouter_key = st.secrets.get('OPENROUTER_API_KEY', '')
             self.openrouter_available = bool(self.openrouter_key)
             
-            # Groq (Llama 3 - DeepSeek 대체)
+            # Groq (Llama 3)
             self.groq_key = st.secrets.get('GROQ_API_KEY', '')
             self.groq_available = bool(self.groq_key)
                 
-            # 사용 가능한 모델 목록
             self.available_models = []
             if self.gemini_available: self.available_models.append('gemini')
             if self.openrouter_available: self.available_models.append('claude')
-            if self.groq_available: self.available_models.append('groq') # deepseek -> groq 변경
+            if self.groq_available: self.available_models.append('groq')
                 
             logger.info(f"사용 가능한 모델: {self.available_models}")
                 
@@ -141,7 +149,7 @@ class FreePlanAISystem:
         self.rate_limits = {
             'gemini': {'count': 0, 'last_reset': time.time(), 'max_per_minute': 15},
             'claude': {'count': 0, 'last_reset': time.time(), 'max_per_minute': 10},
-            'groq': {'count': 0, 'last_reset': time.time(), 'max_per_minute': 30} # Groq는 빠르고 넉넉함
+            'groq': {'count': 0, 'last_reset': time.time(), 'max_per_minute': 30}
         }
     
     def check_rate_limit(self, model: str) -> bool:
@@ -224,7 +232,7 @@ class FreePlanAISystem:
         }
 
     def select_optimal_model(self, intent_analysis: Dict) -> Dict:
-        """의도에 따른 최적 모델 선택 (Groq 통합)"""
+        """의도에 따른 최적 모델 선택"""
         intent_model_mapping = {
             'complex_reasoning': {
                 'primary': 'claude', 'backup': 'groq', 'fallback': 'gemini',
@@ -232,7 +240,7 @@ class FreePlanAISystem:
             },
             'technical': {
                 'primary': 'groq', 'backup': 'gemini', 'fallback': 'claude',
-                'reason': '💻 코딩은 Llama3 (Groq)가 빠르고 정확', 'icon': '💻'
+                'reason': '💻 코딩은 Llama3(Groq)가 빠르고 정확', 'icon': '💻'
             },
             'mathematical': {
                 'primary': 'groq', 'backup': 'gemini', 'fallback': 'claude',
@@ -271,10 +279,11 @@ class FreePlanAISystem:
         return model_choice
 
     def call_gemini_api(self, prompt: str) -> Dict:
-        """Gemini API 호출 (2.5 Flash)"""
+        """Gemini API 호출 (2.5 Flash - 실제 구동 모델)"""
         if not self.gemini_available: return {'success': False}
         try:
             start_time = time.time()
+            # 실제 존재하는 최신 모델명 사용 (안정성 위함)
             model = genai.GenerativeModel('gemini-2.5-flash')
             response = model.generate_content(prompt)
             
@@ -282,7 +291,7 @@ class FreePlanAISystem:
             return {
                 'success': True,
                 'content': response.text,
-                'model': "Google Gemini 2.5 Flash",
+                'model': "Google Gemini Flash",
                 'processing_time': time.time() - start_time,
                 'tokens': len(prompt + response.text) // 4
             }
@@ -291,7 +300,7 @@ class FreePlanAISystem:
             return {'success': False, 'error': str(e)}
 
     def call_openrouter_api(self, prompt: str) -> Dict:
-        """OpenRouter API 호출 (Claude)"""
+        """OpenRouter API 호출 (Claude 3.5 Sonnet - 헤더 수정됨)"""
         if not self.openrouter_available: return {'success': False}
         try:
             start_time = time.time()
@@ -299,10 +308,13 @@ class FreePlanAISystem:
                 "model": "anthropic/claude-3.5-sonnet",
                 "messages": [{"role": "user", "content": prompt}],
             }
+            # ✅ [수정] OpenRouter 필수 헤더 추가 (HTTP-Referer, X-Title)
             response = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {self.openrouter_key}",
+                    "HTTP-Referer": "http://localhost:8501", # 필수: 사이트 URL
+                    "X-Title": "JiNu Hybrid AI",             # 필수: 앱 이름
                     "Content-Type": "application/json"
                 },
                 json=data, timeout=60
@@ -318,18 +330,22 @@ class FreePlanAISystem:
                     'processing_time': time.time() - start_time,
                     'tokens': result.get('usage', {}).get('total_tokens', 0)
                 }
-            return {'success': False, 'error': f"Status {response.status_code}"}
+            
+            # 에러 로깅
+            error_text = response.text
+            logger.error(f"Claude API Error {response.status_code}: {error_text}")
+            return {'success': False, 'error': f"Status {response.status_code} - {error_text}"}
+            
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
     def call_groq_api(self, prompt: str) -> Dict:
-        """Groq API 호출 (Llama 3.3 - 최신 버전 적용)"""
+        """Groq API 호출 (Llama 3.3 - 최신)"""
         if not self.groq_available: return {'success': False}
         try:
             start_time = time.time()
             data = {
-                # ✅ 모델명 수정: 최신 Llama 3.3 사용 (기존 모델명 오류 해결)
-                "model": "llama-3.3-70b-versatile",
+                "model": "llama-3.3-70b-versatile", # ✅ 최신 모델명
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.7
             }
@@ -352,15 +368,10 @@ class FreePlanAISystem:
                     'processing_time': time.time() - start_time,
                     'tokens': result.get('usage', {}).get('total_tokens', 0)
                 }
-            
-            # 오류 발생 시 터미널에 상세 내용 출력
-            error_msg = f"Status {response.status_code} - {response.text}"
-            logger.error(f"Groq API Error: {error_msg}")
-            return {'success': False, 'error': error_msg}
-            
+            return {'success': False, 'error': f"Status {response.status_code} - {response.text}"}
         except Exception as e:
-            logger.error(f"Groq Connection Error: {e}")
             return {'success': False, 'error': str(e)}
+
     def intelligent_model_orchestration(self, user_input: str) -> Dict:
         """모델 오케스트레이션 실행"""
         intent_analysis = self.advanced_intent_analysis(user_input)
@@ -372,6 +383,7 @@ class FreePlanAISystem:
 
         response = {'success': False}
         
+        # 선택된 모델 호출
         if selected_model == 'claude':
             response = self.call_openrouter_api(user_input)
         elif selected_model == 'groq':
@@ -379,16 +391,16 @@ class FreePlanAISystem:
         elif selected_model == 'gemini':
             response = self.call_gemini_api(user_input)
             
-        # 백업 로직 (Gemini)
+        # 백업 로직 (Gemini로 자동 전환)
         if not response.get('success'):
             error_msg = response.get('error', 'Unknown')
-            logger.warning(f"{selected_model} 실패, Gemini 백업 시도")
+            logger.warning(f"{selected_model} 실패, Gemini 백업 시도. Error: {error_msg}")
             
             if selected_model != 'gemini' and self.gemini_available:
                  response = self.call_gemini_api(user_input)
                  if response.get('success'):
                      selected_model = 'gemini'
-                     model_choice['reason'] += " (⚠️ 백업 실행)"
+                     model_choice['reason'] += f" (⚠️ 원본 모델 오류로 Gemini 백업 사용)"
 
         if response.get('success'):
             return {
@@ -404,11 +416,20 @@ class FreePlanAISystem:
         else:
             return {'success': False, 'error': f"실패: {response.get('error')}"}
 
+    # ✅ [추가됨] 푸터 출력 함수
+    def display_footer(self):
+        st.markdown("""
+        <div class="footer">
+           copyright © 2025. <strong>Synox Studios</strong>. All rights reserved.<br>
+            Powered by <span style="color: #667eea;">Gemini</span> • <span style="color: #d97757;">Claude</span> • <span style="color: #f25c54;">Groq(Llama3)</span>
+        </div>
+        """, unsafe_allow_html=True)
+
     def display_beautiful_sidebar(self):
         """사이드바 UI"""
         with st.sidebar:
             st.markdown('<div class="main-header">JiNu AI</div>', unsafe_allow_html=True)
-            st.markdown('<div style="text-align: center; margin-bottom: 1rem;"><span class="free-badge">FREE EDITION</span></div>', unsafe_allow_html=True)
+            st.markdown('<div style="text-align: center; margin-bottom: 1rem;"><span class="free-badge">HYBRID ENGINE</span></div>', unsafe_allow_html=True)
             
             st.markdown("### 🔧 연결 상태")
             c1, c2, c3 = st.columns(3)
@@ -435,8 +456,8 @@ class FreePlanAISystem:
             
             free_model_specs = [
                 {"icon": "🧠", "name": "Claude 3.5", "desc": "논리/작문", "type": "CREDIT"},
-                {"icon": "⚡", "name": "Gemini 2.5", "desc": "일반/백업", "type": "FREE"}, 
-                {"icon": "🚀", "name": "Llama 3", "desc": "코딩/속도", "type": "FREE(Groq)"}
+                {"icon": "⚡", "name": "Gemini Flash", "desc": "일반/백업", "type": "FREE"}, 
+                {"icon": "🚀", "name": "Llama 3.3", "desc": "코딩/속도", "type": "FREE(Groq)"}
             ]
             
             for spec in free_model_specs:
@@ -454,11 +475,14 @@ class FreePlanAISystem:
                 st.session_state.messages = []
                 st.session_state.conversation_count = 0
                 st.rerun()
+            
+            # 사이드바 하단에도 푸터 추가
+            self.display_footer()
 
     def display_beautiful_chat(self):
         """채팅 UI"""
         st.markdown('<div class="main-header">💠 JiNu Hybrid AI</div>', unsafe_allow_html=True)
-        st.markdown('<div class="sub-header">상황에 따라 AI 모델을 선택하는 지능형 하이브리드 AI</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">최적의 모델(Claude/Groq/Gemini)이 자동 선택됩니다.</div>', unsafe_allow_html=True)
         
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
@@ -481,6 +505,10 @@ class FreePlanAISystem:
                         """
                         st.markdown(meta_html, unsafe_allow_html=True)
                     except KeyError: pass
+        
+        # ✅ [추가] 대화 끝부분에 푸터 표시
+        if st.session_state.messages:
+            self.display_footer()
 
         if prompt := st.chat_input("질문을 입력하세요..."):
             st.session_state.messages.append({"role": "user", "content": prompt})
@@ -495,7 +523,6 @@ class FreePlanAISystem:
                         "content": result['content'],
                         "metadata": result
                     })
-                    # DB 저장 로직
                     try:
                         cursor = self.conn.cursor()
                         cursor.execute('''
