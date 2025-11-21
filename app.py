@@ -309,8 +309,8 @@ class FreePlanAISystem:
         if not self.gemini_available: return {'success': False}
         try:
             start_time = time.time()
-            # 수정: 2.5-flash -> 1.5-flash (안정성)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            # 수정: 1.5-flash -> 2.5-flash (사용가능한 api로)
+            model = genai.GenerativeModel('gemini-2.5-flash')
             response = model.generate_content(prompt)
             
             st.session_state.model_usage['gemini'] = st.session_state.model_usage.get('gemini', 0) + 1
