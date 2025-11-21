@@ -420,7 +420,7 @@ class FreePlanAISystem:
     def display_footer(self):
         st.markdown("""
         <div class="footer">
-           copyright © 2025. <strong>Synox Studios</strong>. All rights reserved.<br>
+           copyright © 2025 <strong>Synox Studios</strong>. All rights reserved.<br>
             Powered by <span style="color: #667eea;">Gemini</span> • <span style="color: #d97757;">Claude</span> • <span style="color: #f25c54;">Groq(Llama3)</span>
         </div>
         """, unsafe_allow_html=True)
