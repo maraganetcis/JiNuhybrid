@@ -30,7 +30,7 @@ st.set_page_config(
     }
 )
 
-# ✅ CSS 스타일링 (생략 없이 그대로 유지)
+# ✅ CSS 스타일링
 st.markdown("""
 <style>
     .main-header {
@@ -78,23 +78,16 @@ st.markdown("""
     .complexity-high { background: #ff6b6b; color: white; }
     .complexity-medium { background: #ffd93d; color: black; }
     .complexity-low { background: #6bcf7f; color: white; }
-    .user-message {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1rem;
-        border-radius: 15px;
-        border-bottom-right-radius: 5px;
-        margin: 0.5rem 0;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    }
-    .assistant-message {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 15px;
-        border-bottom-left-radius: 5px;
-        border-left: 5px solid #667eea;
-        margin: 0.5rem 0;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    
+    /* 채팅 메시지 스타일은 st.chat_message로 대체되었으나 메타데이터 박스 스타일은 유지 */
+    .metadata-box {
+        margin-top: 0.8rem; 
+        padding: 0.8rem; 
+        background: white; 
+        border-radius: 10px; 
+        border: 1px solid #e0e0e0;
+        font-size: 0.85rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     .stats-card {
         background: white;
@@ -103,22 +96,6 @@ st.markdown("""
         box-shadow: 0 2px 6px rgba(0,0,0,0.1);
         margin: 0.5rem 0;
         text-align: center;
-    }
-    .rate-limit-warning {
-        background: #fff3cd;
-        border: 1px solid #ffeaa7;
-        border-radius: 10px;
-        padding: 1rem;
-        margin: 1rem 0;
-        color: #856404;
-    }
-    .metadata-box {
-        margin-top: 1rem; 
-        padding: 0.8rem; 
-        background: white; 
-        border-radius: 10px; 
-        border: 1px solid #e0e0e0;
-        font-size: 0.85rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -251,8 +228,7 @@ class FreePlanAISystem:
         }
 
     def select_optimal_model(self, intent_analysis: Dict) -> Dict:
-        """의도에 따른 최적 모델 선택"""
-        # Gemini 2.5 Flash를 기본 범용/백업 모델로 설정
+        """의도에 따른 최적 모델 선택 (Gemini 2.5 중심)"""
         intent_model_mapping = {
             'complex_reasoning': {
                 'primary': 'claude', 'backup': 'gemini', 'fallback': 'deepseek',
@@ -299,11 +275,11 @@ class FreePlanAISystem:
         return model_choice
 
     def call_gemini_api(self, prompt: str) -> Dict:
-        """Gemini API 호출 (2.5 Flash 버전 사용)"""
+        """Gemini API 호출 (2.5 Flash)"""
         if not self.gemini_available: return {'success': False}
         try:
             start_time = time.time()
-            # ✅ 2025년 11월 기준 최신 모델 적용
+            # ✅ 2025년 기준 최신 모델
             model = genai.GenerativeModel('gemini-2.5-flash')
             response = model.generate_content(prompt)
             
@@ -311,7 +287,7 @@ class FreePlanAISystem:
             return {
                 'success': True,
                 'content': response.text,
-                'model': "Google Gemini 2.5 Flash", # 모델명 UI 표시 업데이트
+                'model': "Google Gemini 2.5 Flash", 
                 'processing_time': time.time() - start_time,
                 'tokens': len(prompt + response.text) // 4
             }
@@ -401,7 +377,7 @@ class FreePlanAISystem:
         elif selected_model == 'gemini':
             response = self.call_gemini_api(user_input)
             
-        # 실패 시 백업 시도 (Gemini 2.5가 가용할 경우)
+        # 실패 시 백업 시도
         if not response.get('success'):
             error_msg = response.get('error', 'Unknown')
             logger.warning(f"{selected_model} 실패 ({error_msg}), Gemini 2.5 백업 시도")
@@ -455,7 +431,6 @@ class FreePlanAISystem:
             st.markdown("---")
             st.markdown("### 🏆 모델 라인업 (Nov 2025)")
             
-            # ✅ UI 카드 업데이트: Gemini 2.5 반영
             free_model_specs = [
                 {"icon": "🧠", "name": "Claude 3.5", "desc": "논리, 작문", "type": "CREDIT"},
                 {"icon": "⚡", "name": "Gemini 2.5", "desc": "최신 표준 모델", "type": "FREE"}, 
@@ -479,26 +454,25 @@ class FreePlanAISystem:
                 st.rerun()
 
     def display_beautiful_chat(self):
-        """채팅 UI"""
+        """채팅 UI - HTML 깨짐 방지 적용"""
         st.markdown('<div class="main-header">💠 JiNu Hybrid AI</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub-header">최신 2025년 모델 엔진이 최적의 답변을 제공합니다.</div>', unsafe_allow_html=True)
         
         # 대화 기록 표시
         for msg in st.session_state.messages:
-            if msg["role"] == "user":
-                st.markdown(f"""
-                <div style="display: flex; justify-content: flex-end;">
-                    <div class="user-message">{msg["content"]}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                meta = msg.get('metadata', {})
-                meta_html = ""
-                if meta:
+            # 1. 네이티브 채팅 컨테이너 사용
+            with st.chat_message(msg["role"]):
+                # 2. 메시지 본문 출력 (Markdown)
+                st.markdown(msg["content"])
+                
+                # 3. 메타데이터 (Assistant 전용)
+                if msg.get("role") == "assistant" and "metadata" in msg:
+                    meta = msg["metadata"]
                     try:
                         complexity_class = f"complexity-{meta['intent_analysis']['complexity']}"
                         intent_text = meta['intent_analysis']['primary_intent']
                         
+                        # 메타데이터용 HTML
                         meta_html = f"""
                         <div class="metadata-box">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -510,17 +484,9 @@ class FreePlanAISystem:
                             <div style="text-align: right; font-size: 0.7rem; color: #999; margin-top: 0.3rem;">⏱️ {meta['processing_time']:.2f}s | {meta.get('tokens_used', 0)} tokens</div>
                         </div>
                         """
+                        st.markdown(meta_html, unsafe_allow_html=True)
                     except KeyError:
-                        meta_html = "" 
-
-                st.markdown(f"""
-                <div style="display: flex; justify-content: flex-start;">
-                    <div class="assistant-message" style="max-width: 85%;">
-                        {msg["content"]}
-                        {meta_html}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                        pass 
 
         # 입력창
         if prompt := st.chat_input("질문을 입력하세요..."):
