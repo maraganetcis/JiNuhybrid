@@ -2,7 +2,7 @@ streamlit
 google-generativeai
 requests
 python-dotenv
-anthropic
+duckduckgo-search
 aiohttp
 pydantic
 tenacity
