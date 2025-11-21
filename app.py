@@ -407,7 +407,7 @@ class FreePlanAISystem:
     def display_beautiful_sidebar(self):
         """사이드바 UI"""
         with st.sidebar:
-            st.markdown('<div class="main-header">💠JiNu AI</div>', unsafe_allow_html=True)
+            st.markdown('<div class="main-header">JiNu AI</div>', unsafe_allow_html=True)
             st.markdown('<div style="text-align: center; margin-bottom: 1rem;"><span class="free-badge">FREE EDITION</span></div>', unsafe_allow_html=True)
             
             st.markdown("### 🔧 연결 상태")
