@@ -323,14 +323,15 @@ class FreePlanAISystem:
             return {'success': False, 'error': str(e)}
 
     def call_groq_api(self, prompt: str) -> Dict:
-        """Groq API 호출 (DeepSeek 대체 - Llama 3)"""
+        """Groq API 호출 (Llama 3.3 - 최신 버전 적용)"""
         if not self.groq_available: return {'success': False}
         try:
             start_time = time.time()
             data = {
-                # Llama 3 70B 모델 사용 (코딩 성능 우수)
-                "model": "llama3-70b-8192",
+                # ✅ 모델명 수정: 최신 Llama 3.3 사용 (기존 모델명 오류 해결)
+                "model": "llama-3.3-70b-versatile",
                 "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7
             }
             response = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
@@ -347,14 +348,19 @@ class FreePlanAISystem:
                 return {
                     'success': True,
                     'content': result['choices'][0]['message']['content'],
-                    'model': "Llama 3 70B (via Groq)",
+                    'model': "Llama 3.3 70B (via Groq)",
                     'processing_time': time.time() - start_time,
                     'tokens': result.get('usage', {}).get('total_tokens', 0)
                 }
-            return {'success': False, 'error': f"Status {response.status_code} - {response.text}"}
+            
+            # 오류 발생 시 터미널에 상세 내용 출력
+            error_msg = f"Status {response.status_code} - {response.text}"
+            logger.error(f"Groq API Error: {error_msg}")
+            return {'success': False, 'error': error_msg}
+            
         except Exception as e:
+            logger.error(f"Groq Connection Error: {e}")
             return {'success': False, 'error': str(e)}
-
     def intelligent_model_orchestration(self, user_input: str) -> Dict:
         """모델 오케스트레이션 실행"""
         intent_analysis = self.advanced_intent_analysis(user_input)
