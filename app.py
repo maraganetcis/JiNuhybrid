@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # ✅ 페이지 설정
 st.set_page_config(
-    page_title="JiNu hybrid AI",
+    page_title="JiNu hybrid AI (2025 Edition)",
     page_icon="💠",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -30,7 +30,7 @@ st.set_page_config(
     }
 )
 
-# ✅ CSS 스타일링
+# ✅ CSS 스타일링 (생략 없이 그대로 유지)
 st.markdown("""
 <style>
     .main-header {
@@ -129,7 +129,7 @@ class FreePlanAISystem:
         self.setup_database()
         self.initialize_session_state()
         self.setup_rate_limiting()
-        logger.info("하이브리드 AI 시스템 초기화 완료")
+        logger.info("하이브리드 AI 시스템 초기화 완료 (2025.11)")
     
     def setup_api_keys(self):
         """API 키 설정"""
@@ -140,7 +140,7 @@ class FreePlanAISystem:
                 self.gemini_available = True
                 logger.info("Gemini API 설정 완료")
             else:
-                self.gemini_available = False # 수정: 오타 수정 (=I False -> = False)
+                self.gemini_available = False
                 logger.warning("Gemini API 키 없음")
             
             # OpenRouter
@@ -161,7 +161,7 @@ class FreePlanAISystem:
                 
         except Exception as e:
             logger.error(f"API 키 설정 중 오류: {e}")
-            st.error("API 키 설정 중 오류가 발생했습니다.")
+            st.error("API 키 설정 중 오류가 발생했습니다. .streamlit/secrets.toml 파일을 확인하세요.")
     
     def setup_rate_limiting(self):
         """요청 제한 설정"""
@@ -219,17 +219,14 @@ class FreePlanAISystem:
             st.session_state.conversation_count = 0
         if 'model_usage' not in st.session_state:
             st.session_state.model_usage = {}
-        if 'rate_limit_hits' not in st.session_state:
-            st.session_state.rate_limit_hits = 0
 
     def advanced_intent_analysis(self, user_input: str) -> Dict:
         """사용자 의도 분석"""
         intent_keywords = {
             'complex_reasoning': ['논리', '추론', '분석', '비교', '평가', '비판', '이유', '근거', '복잡', '심층'],
-            'technical': ['코드', '프로그래밍', '알고리즘', '파이썬', '자바', '함수', '에러', '디버깅', 'api', 'json'],
-            'creative': ['작성', '생성', '글쓰기', '시', '소설', '아이디어', '기획', '창작'],
-            'mathematical': ['계산', '수학', '공식', '확률', '통계', '수식'],
-            'research': ['연구', '논문', '이론', '역사', '과학', '조사', '데이터'],
+            'technical': ['코드', '프로그래밍', '알고리즘', '파이썬', '자바', '함수', '에러', '디버깅', 'api', 'json', 'sql'],
+            'creative': ['작성', '생성', '글쓰기', '시', '소설', '아이디어', '기획', '창작', '스토리'],
+            'mathematical': ['계산', '수학', '공식', '확률', '통계', '수식', '미분', '적분'],
         }
         
         intent_scores = {}
@@ -241,9 +238,7 @@ class FreePlanAISystem:
                 intent_scores[intent] = score
         
         word_count = len(user_input.split())
-        if word_count > 25: complexity = 'high'
-        elif word_count > 7: complexity = 'medium'
-        else: complexity = 'low'
+        complexity = 'high' if word_count > 25 else 'medium' if word_count > 7 else 'low'
         
         primary_intent = 'general'
         if intent_scores:
@@ -257,9 +252,10 @@ class FreePlanAISystem:
 
     def select_optimal_model(self, intent_analysis: Dict) -> Dict:
         """의도에 따른 최적 모델 선택"""
+        # Gemini 2.5 Flash를 기본 범용/백업 모델로 설정
         intent_model_mapping = {
             'complex_reasoning': {
-                'primary': 'claude', 'backup': 'deepseek', 'fallback': 'gemini',
+                'primary': 'claude', 'backup': 'gemini', 'fallback': 'deepseek',
                 'reason': '🧠 복잡한 논리/추론에는 Claude 3.5가 우수', 'icon': '🧠'
             },
             'technical': {
@@ -276,16 +272,14 @@ class FreePlanAISystem:
             },
             'general': {
                 'primary': 'gemini', 'backup': 'deepseek', 'fallback': 'claude',
-                'reason': '⚡ 일반 질문에는 빠르고 경제적인 Gemini', 'icon': '⚡'
+                'reason': '⚡ 일반 질문에는 빠르고 성능이 좋은 Gemini 2.5', 'icon': '⚡'
             }
         }
         
         primary_intent = intent_analysis['primary_intent']
         model_choice = intent_model_mapping.get(primary_intent, intent_model_mapping['general'])
         
-        # 모델 가용성 및 제한 체크 로직
         selected_model = None
-        
         for tier in ['primary', 'backup', 'fallback']:
             candidate = model_choice[tier]
             if candidate in self.available_models and self.check_rate_limit(candidate):
@@ -305,11 +299,11 @@ class FreePlanAISystem:
         return model_choice
 
     def call_gemini_api(self, prompt: str) -> Dict:
-        """Gemini API 호출"""
+        """Gemini API 호출 (2.5 Flash 버전 사용)"""
         if not self.gemini_available: return {'success': False}
         try:
             start_time = time.time()
-            # 수정: 1.5-flash -> 2.5-flash (사용가능한 api로)
+            # ✅ 2025년 11월 기준 최신 모델 적용
             model = genai.GenerativeModel('gemini-2.5-flash')
             response = model.generate_content(prompt)
             
@@ -317,7 +311,7 @@ class FreePlanAISystem:
             return {
                 'success': True,
                 'content': response.text,
-                'model': "Google Gemini Flash",
+                'model': "Google Gemini 2.5 Flash", # 모델명 UI 표시 업데이트
                 'processing_time': time.time() - start_time,
                 'tokens': len(prompt + response.text) // 4
             }
@@ -326,7 +320,7 @@ class FreePlanAISystem:
             return {'success': False, 'error': str(e)}
 
     def call_openrouter_api(self, prompt: str) -> Dict:
-        """OpenRouter API 호출"""
+        """OpenRouter API 호출 (Claude)"""
         if not self.openrouter_available: return {'success': False}
         try:
             start_time = time.time()
@@ -336,7 +330,10 @@ class FreePlanAISystem:
             }
             response = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {self.openrouter_key}"},
+                headers={
+                    "Authorization": f"Bearer {self.openrouter_key}",
+                    "Content-Type": "application/json"
+                },
                 json=data, timeout=60
             )
             
@@ -350,12 +347,12 @@ class FreePlanAISystem:
                     'processing_time': time.time() - start_time,
                     'tokens': result.get('usage', {}).get('total_tokens', 0)
                 }
-            return {'success': False, 'error': f"Status {response.status_code}"}
+            return {'success': False, 'error': f"Status {response.status_code} - {response.text}"}
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
     def call_deepseek_api(self, prompt: str) -> Dict:
-        """DeepSeek API 호출"""
+        """DeepSeek API 호출 (V3)"""
         if not self.deepseek_available: return {'success': False}
         try:
             start_time = time.time()
@@ -365,7 +362,10 @@ class FreePlanAISystem:
             }
             response = requests.post(
                 "https://api.deepseek.com/chat/completions",
-                headers={"Authorization": f"Bearer {self.deepseek_key}"},
+                headers={
+                    "Authorization": f"Bearer {self.deepseek_key}",
+                    "Content-Type": "application/json"
+                },
                 json=data, timeout=60
             )
             
@@ -379,7 +379,7 @@ class FreePlanAISystem:
                     'processing_time': time.time() - start_time,
                     'tokens': result.get('usage', {}).get('total_tokens', 0)
                 }
-            return {'success': False, 'error': f"Status {response.status_code}"}
+            return {'success': False, 'error': f"Status {response.status_code} - {response.text}"}
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
@@ -387,8 +387,11 @@ class FreePlanAISystem:
         """모델 오케스트레이션 실행"""
         intent_analysis = self.advanced_intent_analysis(user_input)
         model_choice = self.select_optimal_model(intent_analysis)
-        selected_model = model_choice['selected']
+        selected_model = model_choice.get('selected')
         
+        if not selected_model:
+            return {'success': False, 'error': "사용 가능한 API 키가 없거나 모든 모델이 한도 초과입니다."}
+
         response = {'success': False}
         
         if selected_model == 'claude':
@@ -398,11 +401,16 @@ class FreePlanAISystem:
         elif selected_model == 'gemini':
             response = self.call_gemini_api(user_input)
             
-        # 실패 시 백업 시도 (간소화된 로직)
-        if not response.get('success') and selected_model != 'gemini' and self.gemini_available:
-             response = self.call_gemini_api(user_input)
-             selected_model = 'gemini'
-             model_choice['reason'] += " (오류로 인해 Gemini 백업 사용)"
+        # 실패 시 백업 시도 (Gemini 2.5가 가용할 경우)
+        if not response.get('success'):
+            error_msg = response.get('error', 'Unknown')
+            logger.warning(f"{selected_model} 실패 ({error_msg}), Gemini 2.5 백업 시도")
+            
+            if selected_model != 'gemini' and self.gemini_available:
+                 response = self.call_gemini_api(user_input)
+                 if response.get('success'):
+                     selected_model = 'gemini'
+                     model_choice['reason'] += " (⚠️ 원본 모델 오류로 Gemini 2.5 백업 사용)"
 
         if response.get('success'):
             return {
@@ -412,17 +420,17 @@ class FreePlanAISystem:
                 'intent_analysis': intent_analysis,
                 'model_reason': model_choice['reason'],
                 'processing_time': response['processing_time'],
-                'tokens_used': response['tokens'],
+                'tokens_used': response.get('tokens', 0),
                 'model_icon': model_choice['icon']
             }
         else:
-            return {'success': False, 'error': "모든 모델 호출 실패"}
+            return {'success': False, 'error': f"모델 호출 실패: {response.get('error')}"}
 
     def display_beautiful_sidebar(self):
         """사이드바 UI"""
         with st.sidebar:
             st.markdown('<div class="main-header">💠JiNu AI</div>', unsafe_allow_html=True)
-            st.markdown('<div style="text-align: center; margin-bottom: 1rem;"><span class="free-badge">HYBRID ENGINE</span></div>', unsafe_allow_html=True)
+            st.markdown('<div style="text-align: center; margin-bottom: 1rem;"><span class="free-badge">HYBRID ENGINE (2025)</span></div>', unsafe_allow_html=True)
             
             st.markdown("### 🔧 연결 상태")
             c1, c2, c3 = st.columns(3)
@@ -445,12 +453,12 @@ class FreePlanAISystem:
                     st.caption(f"{m.title()}: {c}회")
 
             st.markdown("---")
-            st.markdown("### 🏆 모델 라인업")
+            st.markdown("### 🏆 모델 라인업 (Nov 2025)")
             
-            # 수정: type 키 추가하여 KeyError 방지
+            # ✅ UI 카드 업데이트: Gemini 2.5 반영
             free_model_specs = [
                 {"icon": "🧠", "name": "Claude 3.5", "desc": "논리, 작문", "type": "CREDIT"},
-                {"icon": "⚡", "name": "Gemini Flash", "desc": "빠른 응답", "type": "FREE"}, 
+                {"icon": "⚡", "name": "Gemini 2.5", "desc": "최신 표준 모델", "type": "FREE"}, 
                 {"icon": "💻", "name": "DeepSeek V3", "desc": "코딩, 수학", "type": "FREE"}
             ]
             
@@ -473,7 +481,7 @@ class FreePlanAISystem:
     def display_beautiful_chat(self):
         """채팅 UI"""
         st.markdown('<div class="main-header">💠 JiNu Hybrid AI</div>', unsafe_allow_html=True)
-        st.markdown('<div class="sub-header">질문의 의도를 파악하여 최적의 모델이 자동으로 답변합니다.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">최신 2025년 모델 엔진이 최적의 답변을 제공합니다.</div>', unsafe_allow_html=True)
         
         # 대화 기록 표시
         for msg in st.session_state.messages:
@@ -487,18 +495,24 @@ class FreePlanAISystem:
                 meta = msg.get('metadata', {})
                 meta_html = ""
                 if meta:
-                    meta_html = f"""
-                    <div class="metadata-box">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="color: #667eea; font-weight: bold;">{meta.get('model_icon', '🤖')} {meta['model_name']}</span>
-                            <span class="intent-badge complexity-{meta['intent_analysis']['complexity']}">{meta['intent_analysis']['primary_intent']}</span>
+                    try:
+                        complexity_class = f"complexity-{meta['intent_analysis']['complexity']}"
+                        intent_text = meta['intent_analysis']['primary_intent']
+                        
+                        meta_html = f"""
+                        <div class="metadata-box">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="color: #667eea; font-weight: bold;">{meta.get('model_icon', '🤖')} {meta['model_name']}</span>
+                                <span class="intent-badge {complexity_class}">{intent_text}</span>
+                            </div>
+                            <hr style="margin: 0.5rem 0; opacity: 0.2;">
+                            <div style="color: #666;">💡 {meta['model_reason']}</div>
+                            <div style="text-align: right; font-size: 0.7rem; color: #999; margin-top: 0.3rem;">⏱️ {meta['processing_time']:.2f}s | {meta.get('tokens_used', 0)} tokens</div>
                         </div>
-                        <hr style="margin: 0.5rem 0; opacity: 0.2;">
-                        <div style="color: #666;">💡 {meta['model_reason']}</div>
-                        <div style="text-align: right; font-size: 0.7rem; color: #999; margin-top: 0.3rem;">⏱️ {meta['response_time']:.2f}s | {meta['tokens_used']} tokens</div>
-                    </div>
-                    """
-                
+                        """
+                    except KeyError:
+                        meta_html = "" 
+
                 st.markdown(f"""
                 <div style="display: flex; justify-content: flex-start;">
                     <div class="assistant-message" style="max-width: 85%;">
@@ -509,11 +523,11 @@ class FreePlanAISystem:
                 """, unsafe_allow_html=True)
 
         # 입력창
-        if prompt := st.chat_input("질문을 입력하세요... (예: 파이썬 코드 짜줘, 시 써줘, 이게 뭐야?)"):
+        if prompt := st.chat_input("질문을 입력하세요..."):
             st.session_state.messages.append({"role": "user", "content": prompt})
             st.rerun()
 
-        # 답변 생성 로직 (마지막 메시지가 유저일 경우 실행)
+        # 답변 생성 로직
         if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
             with st.spinner("🤔 하이브리드 AI가 생각 중입니다..."):
                 result = self.intelligent_model_orchestration(st.session_state.messages[-1]["content"])
