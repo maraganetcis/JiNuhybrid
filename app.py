@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # ✅ 페이지 설정
 st.set_page_config(
-    page_title="JiNu hybrid AI (Groq Edition)",
+    page_title="JiNu hybrid AI",
     page_icon="💠",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -458,7 +458,7 @@ class FreePlanAISystem:
     def display_beautiful_chat(self):
         """채팅 UI"""
         st.markdown('<div class="main-header">💠 JiNu Hybrid AI</div>', unsafe_allow_html=True)
-        st.markdown('<div class="sub-header">DeepSeek를 더 빠른 Groq(Llama3)로 대체했습니다.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">상황에 따라 AI 모델을 선택하는 지능형 하이브리드 AI</div>', unsafe_allow_html=True)
         
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
